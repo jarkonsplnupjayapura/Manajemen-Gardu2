@@ -145,8 +145,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       <div class="form-group" style="flex:2;min-width:240px;">
         <label>Supabase Project URL</label>
         <input class="api-input" id="sb-url" type="url"
-          placeholder="https://xxxxx.supabase.co"
-          value="https://lrjpdcyyaxcfdpzxygrj.supabase.co">
+          placeholder="https://ckarfhmaydqhcclvueqn.supabase.co"
+          value="https://ckarfhmaydqhcclvueqn.supabase.co">
         <span class="help-text">Dari Settings → API di dashboard Supabase</span>
       </div>
     </div>
@@ -154,8 +154,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       <div class="form-group">
         <label>Anon Key (public)</label>
         <input class="api-input" id="sb-anon" type="text"
-          placeholder="eyJhbGci..."
-          value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyanBkY3l5YXhjZmRwenh5Z3JqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1NDI4MzcsImV4cCI6MjA5NDExODgzN30.BgplnVYogpr5qRQ2pITNLuC4iw7AzuR_rikuxSM7Dxo">
+          placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrYXJmaG1heWRxaGNjbHZ1ZXFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzMzkwNTgsImV4cCI6MjA5NDkxNTA1OH0.js9CKdBZ-8omTQpwaTfnuvTGStuB1tajjRbdCrP5L6o"
+          value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNrYXJmaG1heWRxaGNjbHZ1ZXFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzMzkwNTgsImV4cCI6MjA5NDkxNTA1OH0.js9CKdBZ-8omTQpwaTfnuvTGStuB1tajjRbdCrP5L6o">
         <span class="help-text">Anon/public key, bukan service_role key</span>
       </div>
     </div>
@@ -163,8 +163,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       <div class="form-group">
         <label>URL Halaman Web App (index.html)</label>
         <input class="api-input" id="web-url" type="url"
-          placeholder="https://namadomain.com/index.html"
-          value="">
+          placeholder="https://jarkonsplnupjayapura.github.io/Manajemen-Gardu/"
+          value="https://jarkonsplnupjayapura.github.io/Manajemen-Gardu/">
         <span class="help-text">URL lengkap halaman app. QR akan mengarah ke: URL + ?direct=1&noGardu=XXX</span>
       </div>
     </div>
@@ -285,7 +285,7 @@ function sbFetch(cfg, path, opts) {
   });
 }
 
-// ── Muat Gardu dari Supabase ─────────────────────────────────
+// ── Muat Gardu dari Supabase (PAGINATION — semua data) ────────
 function muatGardu() {
   var cfg = getConfig();
   if (!cfg.sbUrl) { showStatus('❌ Isi Supabase Project URL terlebih dahulu.', 'err'); return; }
@@ -293,34 +293,67 @@ function muatGardu() {
 
   showStatus('⏳ Memuat data gardu dari Supabase...', 'info');
   document.getElementById('qr-container').innerHTML =
-    '<div class="loading"><div class="spinner"></div>Mengambil data gardu dari Supabase...</div>';
+    '<div class="loading"><div class="spinner"></div><div id="load-msg">Mengambil data gardu dari Supabase...</div></div>';
 
-  // Coba ambil dari view v_gardu_lengkap dulu, fallback ke tabel gardu
-  var url = cfg.sbUrl + '/rest/v1/v_gardu_lengkap?select=no_gardu,ulp,penyulang,alamat,kapasitas_kva,status_operasional&order=no_gardu.asc&limit=5000';
-  var headers = {
-    'apikey':        cfg.sbAnon,
-    'Authorization': 'Bearer ' + cfg.sbAnon,
-    'Content-Type':  'application/json'
-  };
+  var PAGE_SIZE = 500; // ambil 500 per request, aman di bawah limit Supabase
+  var collected = [];
+  var tableName = 'v_gardu_lengkap'; // akan di-fallback ke 'gardu' kalau 404
 
-  fetch(url, { headers: headers })
-    .then(function(r) {
-      if (!r.ok && r.status === 404) {
-        // Fallback ke tabel gardu
-        return fetch(cfg.sbUrl + '/rest/v1/gardu?select=no_gardu,ulp,penyulang,alamat,kapasitas_kva,status_operasional&order=no_gardu.asc&limit=5000', { headers: headers });
-      }
-      return r;
-    })
-    .then(function(r) {
-      if (!r.ok) {
-        throw new Error('HTTP ' + r.status + ': ' + r.statusText + '. Periksa Supabase URL dan Anon Key.');
-      }
-      return r.json();
-    })
+  function buildPageURL(table, offset) {
+    return cfg.sbUrl + '/rest/v1/' + table +
+      '?select=no_gardu,ulp,penyulang,alamat,kapasitas_kva,status_operasional' +
+      '&order=no_gardu.asc' +
+      '&limit=' + PAGE_SIZE +
+      '&offset=' + offset;
+  }
+
+  function makeHeaders(withCount) {
+    var h = {
+      'apikey':        cfg.sbAnon,
+      'Authorization': 'Bearer ' + cfg.sbAnon,
+      'Content-Type':  'application/json'
+    };
+    if (withCount) h['Prefer'] = 'count=exact';
+    return h;
+  }
+
+  function updateLoadMsg(msg) {
+    var el = document.getElementById('load-msg');
+    if (el) el.textContent = msg;
+  }
+
+  // Ambil semua halaman secara rekursif
+  function fetchPage(table, offset) {
+    return fetch(buildPageURL(table, offset), { headers: makeHeaders(false) })
+      .then(function(r) {
+        // Jika v_gardu_lengkap tidak ada, coba tabel gardu
+        if (!r.ok && r.status === 404 && table === 'v_gardu_lengkap') {
+          tableName = 'gardu';
+          collected = [];
+          return fetchPage('gardu', 0);
+        }
+        if (!r.ok) {
+          throw new Error('HTTP ' + r.status + ' ' + r.statusText + '. Periksa URL & Anon Key.');
+        }
+        return r.json().then(function(pageData) {
+          if (!Array.isArray(pageData)) {
+            throw new Error('Response bukan array. Periksa konfigurasi Supabase.');
+          }
+          collected = collected.concat(pageData);
+          updateLoadMsg('Mengambil data... ' + collected.length + ' gardu dimuat');
+
+          // Kalau halaman penuh → masih ada data → ambil halaman berikutnya
+          if (pageData.length === PAGE_SIZE) {
+            return fetchPage(table, offset + PAGE_SIZE);
+          }
+          // Selesai
+          return collected;
+        });
+      });
+  }
+
+  fetchPage(tableName, 0)
     .then(function(data) {
-      if (!Array.isArray(data)) {
-        throw new Error('Response bukan array. Periksa konfigurasi Supabase.');
-      }
       allGardu = data
         .filter(function(g) { return String(g.no_gardu || '').trim() !== ''; })
         .map(function(g) {
@@ -354,7 +387,7 @@ function muatGardu() {
       document.getElementById('btn-print-all').disabled = false;
       document.getElementById('btn-dl-all').disabled = false;
 
-      showStatus('✅ ' + allGardu.length + ' gardu berhasil dimuat dari Supabase.', 'ok');
+      showStatus('✅ ' + allGardu.length + ' gardu berhasil dimuat dari Supabase (tabel: ' + tableName + ').', 'ok');
       applyFilter();
     })
     .catch(function(err) {
@@ -545,7 +578,7 @@ function printSemua() {
   window.print();
 }
 
-// ── Download ZIP ─────────────────────────────────────────────
+// ── Download ZIP (generate QR off-screen, tidak tergantung DOM) ──
 function downloadSemua() {
   if (!filteredGardu.length) { alert('Tidak ada QR yang dimuat.'); return; }
 
@@ -557,65 +590,112 @@ function downloadSemua() {
   btnDl.disabled = true;
   btnDl.textContent = '⏳ Menyiapkan...';
   progressWrap.style.display = 'block';
-  progressFill.style.width = '10%';
-  progressLabel.textContent = 'Mengumpulkan QR dari halaman...';
-  showStatus('⏳ Mengumpulkan ' + filteredGardu.length + ' QR ke dalam ZIP...', 'info');
+  progressFill.style.width = '2%';
+  progressLabel.textContent = 'Memulai proses...';
+  showStatus('⏳ Membuat ' + filteredGardu.length + ' QR ke dalam ZIP...', 'info');
 
-  // Tunggu agar semua canvas sudah ter-render
-  setTimeout(function() {
-    var zip = new JSZip();
-    var folder = zip.folder('QR_Gardu_PLN_UP3_Jayapura');
-    var missing = 0;
-    var total = filteredGardu.length;
+  var zip    = new JSZip();
+  var folder = zip.folder('QR_Gardu_PLN_UP3_Jayapura');
+  var total  = filteredGardu.length;
+  var done   = 0;
+  var errors = 0;
 
-    filteredGardu.forEach(function(g, i) {
-      var noGardu = g['NO_GARDU'];
-      var safeId  = 'qr_' + noGardu.replace(/[^a-zA-Z0-9]/g, '_');
-      var canvas  = document.querySelector('#' + safeId + ' canvas');
-      if (!canvas) { missing++; return; }
+  // Container off-screen tempat generate QR satu per satu
+  var offDiv = document.createElement('div');
+  offDiv.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:140px;height:140px;visibility:hidden;';
+  document.body.appendChild(offDiv);
 
-      var dataUrl  = canvas.toDataURL('image/png');
-      var base64   = dataUrl.split(',')[1];
-      var fileName = 'QR_' + noGardu.replace(/[^a-zA-Z0-9\-]/g, '_') + '.png';
-      folder.file(fileName, base64, { base64: true });
+  // Proses batch agar tidak membekukan browser
+  var BATCH = 20;
+  var index  = 0;
 
-      var pct = Math.round(((i + 1) / total) * 50);
-      progressFill.style.width = (10 + pct) + '%';
-      progressLabel.textContent = 'Mengumpulkan ' + (i + 1) + ' / ' + total + ' QR...';
-    });
+  function processBatch() {
+    var end = Math.min(index + BATCH, total);
+    for (var i = index; i < end; i++) {
+      (function(g) {
+        var noGardu = g['NO_GARDU'];
+        var url     = buildURL(noGardu);
+        var fileName= 'QR_' + noGardu.replace(/[^a-zA-Z0-9\-]/g, '_') + '.png';
 
-    progressFill.style.width = '65%';
-    progressLabel.textContent = 'Membuat file ZIP...';
+        // Cek apakah sudah ada canvas di DOM (gardu yang tampak di grid)
+        var safeId  = 'qr_' + noGardu.replace(/[^a-zA-Z0-9]/g, '_');
+        var existingCanvas = document.querySelector('#' + safeId + ' canvas');
+        if (existingCanvas) {
+          try {
+            var b64 = existingCanvas.toDataURL('image/png').split(',')[1];
+            folder.file(fileName, b64, { base64: true });
+          } catch(e) { errors++; }
+          done++;
+          return;
+        }
 
-    zip.generateAsync({ type: 'blob' }, function(metadata) {
-      var pct = 65 + Math.round(metadata.percent * 0.35);
-      progressFill.style.width = pct + '%';
-      progressLabel.textContent = 'Mengkompresi ZIP... ' + Math.round(metadata.percent) + '%';
-    })
-    .then(function(content) {
-      var tanggal = new Date().toISOString().slice(0, 10);
-      saveAs(content, 'QR_Gardu_PLN_UP3_Jayapura_' + tanggal + '.zip');
-      progressFill.style.width = '100%';
-      progressLabel.textContent = '✅ Selesai! ' + (total - missing) + ' QR ter-download.';
-      showStatus(
-        '✅ ZIP berhasil! ' + (total - missing) + ' QR diunduh' +
-        (missing ? ' (' + missing + ' QR belum siap)' : '') + '.',
-        'ok'
-      );
-      setTimeout(function() {
+        // Generate off-screen
+        var tmpDiv = document.createElement('div');
+        offDiv.appendChild(tmpDiv);
+        try {
+          var qr = new QRCode(tmpDiv, {
+            text: url, width: 140, height: 140,
+            colorDark: '#0A2D6B', colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M
+          });
+          var c = tmpDiv.querySelector('canvas');
+          if (c) {
+            var b64 = c.toDataURL('image/png').split(',')[1];
+            folder.file(fileName, b64, { base64: true });
+          } else { errors++; }
+          try { qr.clear(); } catch(e) {}
+        } catch(e) { errors++; }
+        offDiv.removeChild(tmpDiv);
+        done++;
+      }(filteredGardu[i]));
+    }
+
+    index = end;
+    var pct = Math.round((done / total) * 65);
+    progressFill.style.width = (pct + 2) + '%';
+    progressLabel.textContent = 'Membuat QR ' + done + ' / ' + total + '...';
+
+    if (index < total) {
+      setTimeout(processBatch, 0); // yield ke browser
+    } else {
+      // Semua selesai → buat ZIP
+      document.body.removeChild(offDiv);
+      progressFill.style.width = '70%';
+      progressLabel.textContent = 'Membuat file ZIP...';
+
+      zip.generateAsync({ type: 'blob' }, function(meta) {
+        var p = 70 + Math.round(meta.percent * 0.30);
+        progressFill.style.width = p + '%';
+        progressLabel.textContent = 'Mengkompresi... ' + Math.round(meta.percent) + '%';
+      })
+      .then(function(content) {
+        var tanggal = new Date().toISOString().slice(0, 10);
+        saveAs(content, 'QR_Gardu_PLN_UP3_Jayapura_' + tanggal + '.zip');
+        progressFill.style.width = '100%';
+        progressLabel.textContent = '✅ Selesai! ' + (done - errors) + ' QR ter-download.';
+        showStatus(
+          '✅ ZIP berhasil! ' + (done - errors) + ' QR diunduh' +
+          (errors ? ' (' + errors + ' QR gagal)' : '') + '.',
+          'ok'
+        );
+        setTimeout(function() {
+          progressWrap.style.display = 'none';
+          progressFill.style.width = '0%';
+        }, 3000);
+      })
+      .catch(function(err) {
+        showStatus('❌ Gagal membuat ZIP: ' + err.message, 'err');
         progressWrap.style.display = 'none';
-        progressFill.style.width = '0%';
-      }, 3000);
-    })
-    .catch(function(err) {
-      showStatus('❌ Gagal membuat ZIP: ' + err.message, 'err');
-      progressWrap.style.display = 'none';
-    })
-    .finally(function() {
-      btnDl.disabled = false;
-      btnDl.textContent = '⬇️ Download ZIP';
-    });
-  }, 600);
+      })
+      .finally(function() {
+        btnDl.disabled = false;
+        btnDl.textContent = '⬇️ Download ZIP';
+      });
+    }
+  }
+
+  // Mulai
+  setTimeout(processBatch, 100);
 }
 </script>
 </body>
